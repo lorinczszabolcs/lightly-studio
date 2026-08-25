@@ -94,7 +94,7 @@ def test_class_masks_from_annotations__single_annotation(db_session: Session) ->
         annotation_data={"x": 0, "y": 0, "width": 2, "height": 2, "segmentation_mask": [0, 4]},
     )
 
-    masks = semantic_segmentation_metric._class_masks_from_annotations(
+    masks = semantic_segmentation_metric.class_masks_from_annotations(
         annotations=[annotation],
         image=image,
     )
@@ -127,7 +127,7 @@ def test_class_masks_from_annotations__accumulates_same_label(db_session: Sessio
         annotation_data={"x": 0, "y": 1, "width": 2, "height": 1, "segmentation_mask": [2, 2]},
     )
 
-    masks = semantic_segmentation_metric._class_masks_from_annotations(
+    masks = semantic_segmentation_metric.class_masks_from_annotations(
         annotations=[ann1, ann2],
         image=image,
     )
@@ -150,7 +150,7 @@ def test_class_masks_from_annotations__skips_missing_segmentation_details(
         annotation_type=AnnotationType.OBJECT_DETECTION,
     )
 
-    masks = semantic_segmentation_metric._class_masks_from_annotations(
+    masks = semantic_segmentation_metric.class_masks_from_annotations(
         annotations=[annotation],
         image=image,
     )

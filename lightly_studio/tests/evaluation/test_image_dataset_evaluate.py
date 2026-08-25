@@ -863,6 +863,87 @@ def test_mean_average_precision__non_detection_run_raises(
         dataset.evaluate().mean_average_precision(run_id=run_id)
 
 
+def test_segmentation_metrics(
+    patch_collection: None,  # noqa: ARG001
+) -> None:
+    """Computes IoU, mean IoU, and pixel accuracy for a semantic-segmentation run."""
+    dataset = ImageDataset.create(name="test_dataset")
+    label = create_annotation_label(
+        session=dataset.session,
+        root_collection_id=dataset.collection_id,
+        label_name="dog",
+    )
+    image = create_image(
+        session=dataset.session, collection_id=dataset.collection_id, width=2, height=2
+    )
+    _create_gt_and_pred_collections(session=dataset.session, collection_id=dataset.collection_id)
+    # Identical full-image masks -> perfect segmentation.
+    mask_data = {"x": 0, "y": 0, "width": 2, "height": 2, "segmentation_mask": [0, 4]}
+    for source_name in ("gt", "pred"):
+        create_annotation(
+            session=dataset.session,
+            collection_id=dataset.collection_id,
+            sample_id=image.sample_id,
+            annotation_label_id=label.annotation_label_id,
+            annotation_type=AnnotationType.SEGMENTATION_MASK,
+            annotation_data=mask_data,
+            annotation_collection_name=source_name,
+        )
+    dataset.evaluate().semantic_segmentation(
+        name="seg-run",
+        gt_annotation_source="gt",
+        pred_annotation_source="pred",
+    )
+    run_id = dataset.evaluate().list_runs()[0].id
+
+    result = dataset.evaluate().segmentation_metrics(run_id=run_id)
+
+    assert [entry.label for entry in result.per_class] == ["dog"]
+    assert result.per_class[0].iou == pytest.approx(1.0)
+    assert result.mean_iou == pytest.approx(1.0)
+    assert result.pixel_accuracy == pytest.approx(1.0)
+
+
+def test_segmentation_metrics__run_not_found_raises(
+    patch_collection: None,  # noqa: ARG001
+) -> None:
+    """Raises ValueError when the run does not exist."""
+    dataset = ImageDataset.create(name="test_dataset")
+
+    with pytest.raises(ValueError, match="not found"):
+        dataset.evaluate().segmentation_metrics(run_id=uuid4())
+
+
+def test_segmentation_metrics__non_segmentation_run_raises(
+    patch_collection: None,  # noqa: ARG001
+) -> None:
+    """Raises NotImplementedError for a run that is not semantic segmentation."""
+    dataset = ImageDataset.create(name="test_dataset")
+    label = create_annotation_label(
+        session=dataset.session,
+        root_collection_id=dataset.collection_id,
+    )
+    image = create_image(session=dataset.session, collection_id=dataset.collection_id)
+    _create_gt_and_pred_collections(session=dataset.session, collection_id=dataset.collection_id)
+    for source_name in ("gt", "pred"):
+        create_annotation(
+            session=dataset.session,
+            collection_id=dataset.collection_id,
+            sample_id=image.sample_id,
+            annotation_label_id=label.annotation_label_id,
+            annotation_collection_name=source_name,
+        )
+    dataset.evaluate().object_detection(
+        name="od-run",
+        gt_annotation_source="gt",
+        pred_annotation_source="pred",
+    )
+    run_id = dataset.evaluate().list_runs()[0].id
+
+    with pytest.raises(NotImplementedError, match="semantic segmentation"):
+        dataset.evaluate().segmentation_metrics(run_id=run_id)
+
+
 def _create_gt_and_pred_collections(session: Session, collection_id: UUID) -> None:
     """Create child 'gt' and 'pred' annotation collections under the parent collection.
 

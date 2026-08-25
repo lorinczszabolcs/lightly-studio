@@ -49,11 +49,11 @@ def create_and_persist_semantic_segmentation_metrics_per_sample(
                 f"sample {sample_id}, but no image was found."
             )
 
-        gt_masks = _class_masks_from_annotations(
+        gt_masks = class_masks_from_annotations(
             annotations=data.gt_per_sample.get(sample_id, []),
             image=image,
         )
-        pred_masks = _class_masks_from_annotations(
+        pred_masks = class_masks_from_annotations(
             annotations=data.pred_per_sample.get(sample_id, []),
             image=image,
         )
@@ -135,7 +135,7 @@ def compute_iou(
     return intersection / union
 
 
-def _class_masks_from_annotations(
+def class_masks_from_annotations(
     annotations: Sequence[AnnotationBaseTable],
     image: ImageTable,
 ) -> dict[UUID, NDArray[np.bool_]]:

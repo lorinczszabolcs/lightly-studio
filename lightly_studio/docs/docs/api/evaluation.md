@@ -53,3 +53,9 @@
 ::: lightly_studio.models.evaluation_metrics
     options:
         members: [DetectionAveragePrecision, ClassAveragePrecision]
+
+## SegmentationMetrics
+
+::: lightly_studio.models.evaluation_metrics
+    options:
+        members: [SegmentationMetrics, ClassIoU]

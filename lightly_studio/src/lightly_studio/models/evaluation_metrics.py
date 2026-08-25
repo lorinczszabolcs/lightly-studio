@@ -69,3 +69,31 @@ class DetectionAveragePrecision(BaseModel):
     mean_average_precision: float
     per_class: list[ClassAveragePrecision]
     iou_thresholds: list[float]
+
+
+class ClassIoU(BaseModel):
+    """Intersection over union of one class in a semantic-segmentation run.
+
+    Attributes:
+        label: Annotation label name.
+        iou: Intersection over union of the class, pooled over all images.
+    """
+
+    label: str
+    iou: float
+
+
+class SegmentationMetrics(BaseModel):
+    """Aggregate metrics of a semantic-segmentation run, pooled over all images.
+
+    Attributes:
+        per_class: Per-class intersection over union.
+        mean_iou: Mean of the per-class intersection over union.
+        pixel_accuracy: Fraction of pixels with a matching class in ground truth
+            and prediction. Assumes at most one class per pixel; pixels covered by
+            no class count as incorrect.
+    """
+
+    per_class: list[ClassIoU]
+    mean_iou: float
+    pixel_accuracy: float

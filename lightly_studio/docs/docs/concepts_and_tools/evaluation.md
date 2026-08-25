@@ -202,4 +202,14 @@ for entry in detection_ap.per_class:
     print(entry.label, entry.average_precision)
 ```
 
+Use `segmentation_metrics()` for semantic-segmentation runs. It recomputes the masks and pools the
+intersection and union over all images, and returns per-class IoU, mean IoU, and pixel accuracy.
+
+```python
+segmentation = evaluator.segmentation_metrics(run_id=runs[0].id)
+print(segmentation.mean_iou, segmentation.pixel_accuracy)
+for entry in segmentation.per_class:
+    print(entry.label, entry.iou)
+```
+
 See [Evaluation API Reference](../api/evaluation.md) for the full API surface.

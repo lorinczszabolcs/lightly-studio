@@ -6,6 +6,8 @@ from collections.abc import Iterable, Sequence
 from typing import Any
 from uuid import UUID
 
+import numpy as np
+from numpy.typing import NDArray
 from pydantic import BaseModel, Field
 from sqlmodel import Session
 
@@ -14,6 +16,7 @@ from lightly_studio.evaluation import (
     average_precision,
     classification_metric,
     object_detection_metric,
+    segmentation_aggregate,
     semantic_segmentation_metric,
     validators,
 )
@@ -21,7 +24,11 @@ from lightly_studio.evaluation.evaluation_data import EvaluationData
 from lightly_studio.evaluation.object_detection_metric import BoundingBox
 from lightly_studio.models.annotation.annotation_base import AnnotationBaseTable
 from lightly_studio.models.evaluation_confusion_matrix import ConfusionMatrix
-from lightly_studio.models.evaluation_metrics import DetectionAveragePrecision, EvaluationMetrics
+from lightly_studio.models.evaluation_metrics import (
+    DetectionAveragePrecision,
+    EvaluationMetrics,
+    SegmentationMetrics,
+)
 from lightly_studio.models.evaluation_run import (
     EvaluationRunCreate,
     EvaluationRunTable,
@@ -36,6 +43,7 @@ from lightly_studio.resolvers import (
     evaluation_annotation_metric_resolver,
     evaluation_run_resolver,
     evaluation_sample_metric_resolver,
+    image_resolver,
 )
 
 
@@ -308,6 +316,36 @@ class ImageDatasetEvaluate:
             iou_thresholds=average_precision.COCO_IOU_THRESHOLDS,
         )
 
+    def segmentation_metrics(self, run_id: UUID) -> SegmentationMetrics:
+        """Return per-class IoU, mean IoU, and pixel accuracy of a segmentation run.
+
+        Recomputes the masks and pools intersection and union over all images.
+        Only semantic segmentation is supported.
+
+        Args:
+            run_id: ID of the evaluation run.
+
+        Returns:
+            Per-class IoU, mean IoU, and pixel accuracy.
+
+        Raises:
+            ValueError: If no run with ``run_id`` exists in the database.
+            NotImplementedError: If the run is not a semantic-segmentation run.
+        """
+        run = self._require_run(run_id)
+        if run.task_type != EvaluationTaskType.SEMANTIC_SEGMENTATION:
+            raise NotImplementedError(
+                f"Segmentation metrics are only available for semantic segmentation, "
+                f"not {run.task_type.value!r}."
+            )
+        gt_masks, pred_masks, image_shapes, label_names = self._load_segmentation_masks(run)
+        return segmentation_aggregate.compute(
+            gt_masks_per_image=gt_masks,
+            pred_masks_per_image=pred_masks,
+            image_shapes=image_shapes,
+            label_names=label_names,
+        )
+
     def _confusion_matrix_with_run(
         self, run_id: UUID
     ) -> tuple[EvaluationRunTable, ConfusionMatrix]:
@@ -367,8 +405,7 @@ class ImageDatasetEvaluate:
         gt_per_image = boxes_per_image(run.gt_annotation_collection_id)
         pred_per_image = boxes_per_image(run.pred_annotation_collection_id)
         label_ids = {box.label_id for boxes in (*gt_per_image, *pred_per_image) for box in boxes}
-        labels = annotation_label_resolver.get_by_ids(session=self.session, ids=list(label_ids))
-        label_names = {label.annotation_label_id: label.annotation_label_name for label in labels}
+        label_names = self._label_names(label_ids)
         return gt_per_image, pred_per_image, label_names
 
     def _run_sample_ids(self, run_id: UUID) -> set[UUID]:
@@ -378,6 +415,65 @@ class ImageDatasetEvaluate:
             evaluation_run_id=run_id,
         )
         return {metric.sample_id for metric in metrics}
+
+    def _load_segmentation_masks(
+        self, run: EvaluationRunTable
+    ) -> tuple[
+        list[dict[UUID, NDArray[np.bool_]]],
+        list[dict[UUID, NDArray[np.bool_]]],
+        list[tuple[int, int]],
+        dict[UUID, str],
+    ]:
+        """Load the run's ground-truth and prediction class masks, grouped per image.
+
+        Uses the samples the run actually scored, decodes each sample's masks at
+        its image size.
+
+        Returns:
+            Ground-truth class masks per image, prediction class masks per image
+            (same order), the ``(height, width)`` of each image, and a mapping
+            from label ID to label name.
+        """
+        annotation_type = validators.get_annotation_type_for_task(run.task_type)
+        sample_ids = sorted(self._run_sample_ids(run.id))
+        image_by_sample_id = {
+            image.sample_id: image
+            for image in image_resolver.get_many_by_id(session=self.session, sample_ids=sample_ids)
+        }
+
+        def masks_by_sample(collection_id: UUID) -> dict[UUID, dict[UUID, NDArray[np.bool_]]]:
+            by_sample = self._group_by_parent_sample_id(
+                annotations=annotation_resolver.get_all_by_collection_id_and_parent_sample_ids(
+                    session=self.session,
+                    parent_sample_ids=sample_ids,
+                    annotation_collection_id=collection_id,
+                    annotation_type=annotation_type,
+                )
+            )
+            return {
+                sample_id: semantic_segmentation_metric.class_masks_from_annotations(
+                    annotations=annotations,
+                    image=image_by_sample_id[sample_id],
+                )
+                for sample_id, annotations in by_sample.items()
+            }
+
+        gt_by_sample = masks_by_sample(run.gt_annotation_collection_id)
+        pred_by_sample = masks_by_sample(run.pred_annotation_collection_id)
+        gt_masks = [gt_by_sample.get(sample_id, {}) for sample_id in sample_ids]
+        pred_masks = [pred_by_sample.get(sample_id, {}) for sample_id in sample_ids]
+        image_shapes = [
+            (image_by_sample_id[sample_id].height, image_by_sample_id[sample_id].width)
+            for sample_id in sample_ids
+        ]
+        label_ids = {label for masks in (*gt_masks, *pred_masks) for label in masks}
+        label_names = self._label_names(label_ids)
+        return gt_masks, pred_masks, image_shapes, label_names
+
+    def _label_names(self, label_ids: set[UUID]) -> dict[UUID, str]:
+        """Resolve annotation label IDs to their names."""
+        labels = annotation_label_resolver.get_by_ids(session=self.session, ids=list(label_ids))
+        return {label.annotation_label_id: label.annotation_label_name for label in labels}
 
     def _dataset_id(self) -> UUID:
         """Resolve the dataset ID of the evaluated collection."""
