@@ -4,7 +4,7 @@ Average precision needs the full precision-recall curve, so it re-matches the
 stored predictions and ground truths instead of reading the single-threshold
 metrics. The IoU matrix is computed once per class per image and reused across
 thresholds, as ``object_detection_metric`` is split for. Only the per-class value at
-each threshold is persisted; means over classes or thresholds are derived on read.
+each threshold is persisted. Means over classes or thresholds are derived on read.
 """
 
 from __future__ import annotations
@@ -19,7 +19,10 @@ from sqlmodel import Session
 from lightly_studio.evaluation import object_detection_metric
 from lightly_studio.evaluation.evaluation_data import EvaluationData
 from lightly_studio.evaluation.object_detection_metric import BoundingBox
-from lightly_studio.models.evaluation_class_metric import EvaluationClassMetricCreate
+from lightly_studio.models.evaluation_class_metric import (
+    EvaluationClassMetricCreate,
+    EvaluationClassMetricTable,
+)
 from lightly_studio.resolvers import evaluation_class_metric_resolver
 
 # COCO averages average precision over IoU 0.50, 0.55, ..., 0.95.
@@ -27,6 +30,9 @@ COCO_IOU_THRESHOLDS = [round(0.5 + 0.05 * step, 2) for step in range(10)]
 
 # COCO uses a 101-point recall grid for the precision-recall integral.
 _RECALL_GRID = np.linspace(0.0, 1.0, 101)
+
+# Prefix of the class metric names that hold average precision, followed by the threshold.
+_METRIC_NAME_PREFIX = "average_precision@"
 
 
 @dataclass(frozen=True)
@@ -46,7 +52,26 @@ class ClassAveragePrecision:
 
 def metric_name(iou_threshold: float) -> str:
     """Return the class metric name under which average precision at a threshold is stored."""
-    return f"average_precision@{iou_threshold:.2f}"
+    return f"{_METRIC_NAME_PREFIX}{iou_threshold:.2f}"
+
+
+def by_label_and_threshold(
+    class_metrics: Sequence[EvaluationClassMetricTable],
+) -> dict[UUID, dict[float, float]]:
+    """Group the stored average precision by label ID and IoU threshold.
+
+    Args:
+        class_metrics: The class metrics of one run. Rows of other metrics are ignored.
+
+    Returns:
+        The average precision per IoU threshold, for every label with stored values.
+    """
+    grouped: dict[UUID, dict[float, float]] = {}
+    for row in class_metrics:
+        if row.metric_name.startswith(_METRIC_NAME_PREFIX):
+            threshold = float(row.metric_name[len(_METRIC_NAME_PREFIX) :])
+            grouped.setdefault(row.annotation_label_id, {})[threshold] = row.value
+    return grouped
 
 
 def create_and_persist(session: Session, data: EvaluationData) -> None:

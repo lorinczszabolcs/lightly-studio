@@ -17,6 +17,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - Show the distribution panel on the videos grid in the GUI, with annotation class and metadata distributions.
 - Python SDK: Embed images that are added after `register_remote_embedder` on the remote embedding server, if the server embeds image bytes.
 - Python SDK: Store the per-class average precision of object-detection runs at each IoU threshold when `compute_average_precision=True` is set in `ObjectDetectionEvaluationConfig`.
+- Python SDK: `dataset.evaluate().metrics(run_id)` includes the per-class and mean average precision of object-detection runs created with `compute_average_precision=True`, averaged over the IoU thresholds 0.50 to 0.95 and at each threshold.
 
 ### Changed
 
