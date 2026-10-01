@@ -7,6 +7,7 @@ from uuid import UUID
 from sqlmodel import Session
 
 from lightly_studio.evaluation import (
+    average_precision,
     classification_metric,
     instance_segmentation_metric,
     object_detection_metric,
@@ -27,6 +28,7 @@ from lightly_studio.resolvers import (
     annotation_collection_coverage_resolver,
     annotation_resolver,
     evaluation_annotation_metric_resolver,
+    evaluation_class_metric_resolver,
     evaluation_run_resolver,
     evaluation_sample_metric_resolver,
 )
@@ -58,6 +60,9 @@ def recompute_evaluation_run(
         session=session, evaluation_run_id=run.id
     )
     evaluation_sample_metric_resolver.delete_by_evaluation_run_id(
+        session=session, evaluation_run_id=run.id
+    )
+    evaluation_class_metric_resolver.delete_by_evaluation_run_id(
         session=session, evaluation_run_id=run.id
     )
     _persist_metrics(session=session, run=run, data=data)
@@ -109,6 +114,9 @@ def _persist_metrics(session: Session, run: EvaluationRunTable, data: Evaluation
     """Compute and persist fresh metrics for the run's task type."""
     if run.task_type == EvaluationTaskType.OBJECT_DETECTION:
         config = ObjectDetectionEvaluationConfig.model_validate(run.config_json)
+        if config.compute_average_precision:
+            # Runs first, because the per-sample commits expire the loaded annotations
+            average_precision.create_and_persist(session=session, data=data)
         object_detection_metric.create_and_persist_object_detection_metrics_per_sample(
             session=session,
             data=data,
